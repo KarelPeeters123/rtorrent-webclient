@@ -4,8 +4,8 @@
 This implements Option A (Transmission) from the interactive discussion.
 
 Usage:
-  - CLI: python rtorrent.py add "magnet:?xt=..." /path/to/dest
-  - Programmatic: from rtorrent import add_magnet; add_magnet(magnet, dest)
+    - CLI: python rtorrent.py add "magnet:?xt=..."
+    - Programmatic: from rtorrent import add_magnet; add_magnet(magnet)
 
 Behavior:
   - Try to use the Python library `transmission-rpc` (if installed) to add the torrent
@@ -41,8 +41,13 @@ def _get_config():
     }
 
 
-def add_magnet_transmission_rpc(magnet: str, dest: str, host: str, port: int, user: Optional[str], password: Optional[str]):
+# Fixed download directory used for all torrents
+DOWNLOAD_DIR = os.environ.get("TRANSMISSION_DOWNLOAD_DIR", "/var/lib/transmission-daemon/downloads")
+
+
+def add_magnet_transmission_rpc(magnet: str, host: str, port: int, user: Optional[str], password: Optional[str], download_dir: str):
     """Add magnet using transmission-rpc library. Raises ImportError if lib missing.
+    Uses the provided download_dir.
     Returns the id or added Torrent object depending on the library.
     """
     try:
@@ -53,16 +58,16 @@ def add_magnet_transmission_rpc(magnet: str, dest: str, host: str, port: int, us
     client = transmission_rpc.Client(host=host, port=port, username=user, password=password)
     # transmission-rpc's add_torrent accepts a uri and optional download_dir
     # It returns a Torrent or list of Torrents depending on the version.
-    torr = client.add_torrent(magnet, download_dir=dest)
+    torr = client.add_torrent(magnet, download_dir=download_dir)
     return torr
 
 
-def add_magnet_transmission_cli(magnet: str, dest: str):
+def add_magnet_transmission_cli(magnet: str, download_dir: str):
     """Add magnet using transmission-remote CLI. Requires transmission-remote in PATH.
-    Returns subprocess.CompletedProcess on success.
+    Uses the provided download_dir. Returns subprocess.CompletedProcess on success.
     """
-    # Use transmission-remote --add <magnet> --download-dir <dest>
-    cmd = ["transmission-remote", "--add", magnet, "--download-dir", dest]
+    # Use transmission-remote --add <magnet> --download-dir <download_dir>
+    cmd = ["transmission-remote", "--add", magnet, "--download-dir", download_dir]
     # On some systems transmission-remote needs host/port/user/pass flags; rely on defaults
     try:
         proc = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -71,15 +76,25 @@ def add_magnet_transmission_cli(magnet: str, dest: str):
         raise FileNotFoundError("transmission-remote not found in PATH; please install Transmission or use transmission-rpc library")
 
 
-def add_magnet(magnet: str, dest: str):
+def add_magnet(magnet: str, tv: bool = False):
     """High-level add magnet: try RPC library, else CLI fallback.
 
-    Returns a dict with outcome information.
+    If tv=True, use DOWNLOAD_DIR/tv, otherwise use DOWNLOAD_DIR/film.
+    Ensures the chosen directory exists (best-effort). Returns a dict with outcome info.
     """
+    # choose subdir
+    sub = "tv" if tv else "film"
+    download_dir = os.path.join(DOWNLOAD_DIR, sub)
+    # Ensure the download directory exists (best-effort)
+    try:
+        os.makedirs(download_dir, exist_ok=True)
+    except Exception:
+        # If creation fails, continue and let downstream calls report errors
+        pass
     cfg = _get_config()
     # Try RPC library first
     try:
-        torr = add_magnet_transmission_rpc(magnet, dest, cfg["host"], cfg["port"], cfg["user"], cfg["password"])
+        torr = add_magnet_transmission_rpc(magnet, cfg["host"], cfg["port"], cfg["user"], cfg["password"], download_dir)
         return {"method": "rpc", "result": repr(torr)}
     except ImportError:
         # fallback to CLI
@@ -90,7 +105,7 @@ def add_magnet(magnet: str, dest: str):
 
     # CLI fallback
     try:
-        proc = add_magnet_transmission_cli(magnet, dest)
+        proc = add_magnet_transmission_cli(magnet, download_dir)
         return {"method": "cli", "stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode}
     except Exception as e:
         return {"method": "cli", "error": str(e)}
@@ -104,11 +119,11 @@ def _cli_main(argv=None):
 
     addp = sub.add_parser("add", help="Add a magnet link")
     addp.add_argument("magnet", help="Magnet URI (quoted)")
-    addp.add_argument("dest", help="Destination directory for this torrent")
+    addp.add_argument("--tv", action="store_true", help="Place download in the 'tv' subdirectory; default is 'film'")
 
     args = p.parse_args(argv)
     if args.cmd == "add":
-        out = add_magnet(args.magnet, args.dest)
+        out = add_magnet(args.magnet, tv=args.tv)
         print(out)
     else:
         p.print_help()
