@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Transmission Web Client</title>
+    <style>
+        body {
+            font-family: "Segoe UI", Roboto, sans-serif;
+            background: #f6f8fa;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            background: #0366d6;
+            color: white;
+            padding: 1rem 2rem;
+        }
+        h1 {
+            margin: 0;
+            font-size: 1.6rem;
+        }
+        main {
+            padding: 2rem;
+            max-width: 900px;
+            margin: auto;
+        }
+        form {
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 1rem 1.5rem;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 0.5rem;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        select, button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #28a745;
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        #refresh-btn {
+            background-color: #007bff;
+        }
+        #refresh-btn:hover {
+            background-color: #0069d9;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        th, td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #fafafa;
+        }
+        #message {
+            margin-top: 1rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Transmission Web Client</h1>
+    </header>
+
+    <main>
+        <form id="add-form">
+            <input type="text" id="magnet" placeholder="Enter magnet link..." required>
+            <select id="media_type">
+                <option value="tv">TV</option>
+                <option value="film">Film</option>
+            </select>
+            <button type="submit">Add Torrent</button>
+        </form>
+
+        <div style="display:flex; justify-content: space-between; align-items: center;">
+            <h2>Active Torrents</h2>
+            <button id="refresh-btn">🔄 Refresh</button>
+        </div>
+
+        <table id="torrent-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Done</th>
+                    <th>Have</th>
+                    <th>Status</th>
+                    <th>ETA</th>
+                    <th>Up</th>
+                    <th>Down</th>
+                    <th>Ratio</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <div id="message"></div>
+    </main>
+
+    <script>
+        const API_BASE = window.location.origin;  // assumes same host/port
+
+        async function fetchTorrents() {
+            const res = await fetch(`${API_BASE}/list`);
+            const data = await res.json();
+            const tbody = document.querySelector("#torrent-table tbody");
+            tbody.innerHTML = "";
+
+            if (!data.ok) {
+                tbody.innerHTML = `<tr><td colspan="9">Error: ${data.error}</td></tr>`;
+                return;
+            }
+
+            const torrents = data.result.torrents;
+            if (!torrents.length) {
+                tbody.innerHTML = `<tr><td colspan="9">No torrents</td></tr>`;
+                return;
+            }
+
+            for (const t of torrents) {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${t.id}</td>
+                    <td>${t.name}</td>
+                    <td>${t.done}</td>
+                    <td>${t.have}</td>
+                    <td>${t.status}</td>
+                    <td>${t.eta}</td>
+                    <td>${t.up}</td>
+                    <td>${t.down}</td>
+                    <td>${t.ratio}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        document.getElementById("refresh-btn").addEventListener("click", fetchTorrents);
+
+        document.getElementById("add-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const magnet = document.getElementById("magnet").value.trim();
+            const mediaType = document.getElementById("media_type").value;
+            const msg = document.getElementById("message");
+
+            msg.textContent = "Adding torrent...";
+            msg.style.color = "#333";
+
+            const res = await fetch(`${API_BASE}/add`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ magnet, media_type: mediaType })
+            });
+
+            const data = await res.json();
+            if (data.ok) {
+                msg.textContent = "✅ Torrent added successfully!";
+                msg.style.color = "green";
+                document.getElementById("magnet").value = "";
+                fetchTorrents();
+            } else {
+                msg.textContent = "❌ Error: " + data.error;
+                msg.style.color = "red";
+            }
+        });
+
+        // Auto-load table on page load
+        fetchTorrents();
+        // Optional auto-refresh every 30s:
+        setInterval(fetchTorrents, 30000);
+    </script>
+</body>
+</html>

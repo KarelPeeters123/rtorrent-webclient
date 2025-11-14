@@ -39,25 +39,75 @@ def add_magnet_route():
 
     body = request.get_json()
     magnet = body.get("magnet")
-    tv = body.get("tv", False)
+    media_type = body.get("media_type", "tv")
 
     if not magnet or not isinstance(magnet, str):
         return _result_error("Missing or invalid 'magnet' field", 400)
 
     try:
-        tv_flag = bool(tv)
-        logger.info("Adding magnet (tv=%s): %s", tv_flag, magnet)
+        logger.info("Adding magnet (tv=%s): %s", media_type, magnet)
+        tv_flag = media_type == "tv"
         res = rtorrent.add_magnet(magnet, tv=tv_flag)
         return _result_ok(res)
     except Exception as exc:  # pragma: no cover - bubble runtime errors to client
         logger.exception("Failed to add magnet")
         return _result_error(f"Failed to add magnet: {exc}", 500)
 
+@app.route("/list", methods=["GET"])
+def list_torrents():
+    """Return the output of `transmission-remote 127.0.0.1:9091 --list` as JSON."""
+    import subprocess
+    import shlex
 
-@app.route("/", methods=["GET"])
+    cmd = ["transmission-remote", "127.0.0.1:9091", "--list"]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        output = result.stdout.strip()
+
+        # Parse Transmission's table output into a list of dicts
+        lines = output.splitlines()
+        if len(lines) < 2:
+            return _result_ok({"torrents": [], "raw": output})
+
+        header = lines[0]
+        body = lines[1:-1]  # skip the summary line
+        torrents = []
+
+        for line in body:
+            # Transmission's columns look like:
+            # ID   Done       Have  ETA           Up    Down  Ratio  Status       Name
+            # 1*   100%       1.05 GB  Done         0.0   0.0   0.00  Idle         Example.torrent
+            parts = line.split(None, 8)
+            if len(parts) < 9:
+                continue
+            torrents.append({
+                "id": parts[0],
+                "done": parts[1],
+                "have": parts[2],
+                "eta": parts[3],
+                "up": parts[4],
+                "down": parts[5],
+                "ratio": parts[6],
+                "status": parts[7],
+                "name": parts[8],
+            })
+
+        return _result_ok({"torrents": torrents})
+
+    except subprocess.CalledProcessError as e:
+        return _result_error(f"Command failed: {e.stderr.strip()}", 500)
+    except FileNotFoundError:
+        return _result_error("transmission-remote not found; install Transmission CLI tools", 500)
+    except Exception as e:
+        return _result_error(f"Unexpected error: {e}", 500)
+
+@app.route("/ping", methods=["GET"])
 def index():
     return jsonify({"ok": True, "msg": "rtorrent-webclient API running"})
 
+@app.route("/")
+def serve_ui():
+    return app.send_static_file("index.html")
 
 if __name__ == "__main__":
     # Default host/port; use a process manager in production
