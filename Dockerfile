@@ -17,13 +17,14 @@ COPY rtorrent.py /app/rtorrent.py
 COPY api.py /app/api.py
 
 # Install Python dependencies
-RUN pip install --no-cache-dir flask gunicorn
+RUN pip install --no-cache-dir flask gunicorn --break-system-packages
 
 # Create Transmission data and config directories
 # Transmission (Debian package) stores runtime config in the 'info' subdir.
 RUN mkdir -p /var/lib/transmission-daemon/downloads/{tv,film} && \
     mkdir -p /var/lib/transmission-daemon/info
-
+COPY post-torrent.sh /var/lib/transmission-daemon/move-completed.sh
+RUN chmod +x /var/lib/transmission-daemon/move-completed.sh
 # Copy transmission settings into the daemon's info directory
 COPY transmission-settings.json /var/lib/transmission-daemon/info/settings.json
 
